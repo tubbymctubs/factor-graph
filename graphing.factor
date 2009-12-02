@@ -1,4 +1,4 @@
-! Copyright (C) 2009 Your name.
+! Copyright (C) 2009 Michael Worcester
 ! See http://factorcode.org/license.txt for BSD license.
 USING: 
 kernel arrays inspector 
