@@ -31,8 +31,6 @@ TUPLE: graph-gadget < gadget
  swap [ swap >>dim ] change-box drop
 ;
 
-: diff ( pair -- diff ) [ last ] keep first - ;
-
 : hand>x ( gadget hand-x -- x )
  over loc>> first - over dim>> first /
  swap x-range>> [ last * ] keep first + >float
