@@ -1,10 +1,10 @@
 ! Copyright (C) 2009 Michael Worcester
 ! See http://factorcode.org/license.txt for BSD license.
 USING: 
-kernel arrays inspector 
+kernel arrays inspector fry
 accessors sorting sequences combinators sequences.deep
 math math.constants math.order math.ranges 
-math.functions math.rectangles
+math.functions math.rectangles math.vectors
 ui ui.gadgets ui.gadgets.editors ui.gestures ui.render
 colors opengl opengl.gl
 specialized-arrays.instances.float
@@ -21,56 +21,79 @@ TUPLE: graph-gadget < gadget
  { box rect }
 ;
 
+: box-fill-color ( -- color ) 255 0 0 0.2 <rgba> ;
+: box-line-color ( -- color ) 0 0 0 1 <rgba> ;
+: line-color ( -- color ) 255 0 0 255 <rgba> ;
+
 : graph-gadget-down ( gadget -- )
- dup hand-rel swap [ swap >>loc ] change-box drop
+ [ box>> ] [ hand-rel ] bi >>loc drop
 ;
 
 : graph-gadget-drag ( gadget -- )
- dup [ hand-rel ] keep box>> loc>> 
- [ - ] 2map
- swap [ swap >>dim ] change-box drop
+ [ box>> ] [ [ hand-rel ] [ box>> loc>> ] bi v- ] bi >>dim drop
 ;
 
-: hand>x ( gadget hand-x -- x )
- over loc>> first - over dim>> first /
- swap x-range>> [ last * ] keep first + >float
+: norm-range ( val range -- norm )
+ [ last * ] [ first ] bi + >float
 ;
 
-: hand>y ( gadget hand-y -- y )
- over loc>> last - over dim>> last / 1 swap -
- swap y-range>> [ last * ] keep first + >float
+: hand>2 ( i loc dim -- val )
+ [ drop - ] keep /
 ;
 
-: box>start-x ( gadget box -- start-x ) loc>> first hand>x ;
-: box>end-x ( gadget box -- end-x )
- [ loc>> first ] keep dim>> first + hand>x
+: >x-params ( gadget -- start end range x w )
+ {
+     [ x-range>> ]
+     [ box>> loc>> first ]
+     [ box>> dim>> first ]
+     [ loc>> first ]
+     [ [ loc>> first ] [ dim>> first ] bi + ]
+ } cleave
 ;
 
-: box>start-y ( gadget box -- start-y ) loc>> last hand>y ;
-: box>end-y ( gadget box -- end-y )
- [ loc>> last ] keep dim>> last + hand>y
+! Alas, stupid y being upside down (plot versus pixels) means
+! we have this... monstrosity (even if it is quite cleave'r).
+: >y-params ( gadget -- start end range y h )
+ {
+     [ y-range>> ]
+     ! this does graph.height - (box.y + box.height)
+     [ [ dim>> last ] [ [ box>> dim>> last ] [ box>> loc>> last ] bi + ] bi - ]
+     [ box>> dim>> last ]
+     [ loc>> last ]
+     [ [ loc>> last ] [ dim>> last ] bi + ]
+ } cleave
+;
+
+! BAD: still uses a rot here...
+: mangle-range ( range a b -- range )
+ swap rot [ [ last * ] curry bi@ ] [ first + ] bi swap 2array
+;
+
+: box>range ( start end range y h  -- range )
+ [ hand>2 ] 2curry bi@ mangle-range
+;
+
+: box-positive? ( gadget -- ? )
+ box>> dim>> first 0 >
+;
+
+: reset-box ( gadget -- box )
+ box>> { 0 0 } >>dim
 ;
 
 : graph-gadget-up ( gadget -- )
- dup box>>
- dim>> first 0 >
- [ 
-   dup box>>
-   [ box>start-x ] 2keep
-   [ box>end-x ] 2keep
-   [ box>end-y ] 2keep
-   [ box>start-y ] 2keep
-   drop
-   -rot over - 2array >>y-range
-   -rot over - 2array >>x-range
+ dup box-positive?
+ [
    f >>auto-range
+   dup 
+   [ >y-params box>range >>y-range ]
+   [ >x-params box>range >>x-range ] bi
  ]
  [
    t >>auto-range
  ] if
 
- { 0 0 } swap [ swap >>dim ] change-box
- drop
+ reset-box drop
 ;
 
 : complete-gesture ( gesture gadget -- ? )
@@ -90,20 +113,15 @@ M: graph-gadget handle-gesture
 ;
 
 : gen-sin-ranges ( -- xx yy )
- 0 2pi 0.01 <range>
- [ ] map dup [ sin ] map
+ 0 2pi 0.01 <range> dup [ sin ] map
 ;
 
 : find-range ( sequence -- range )
- [ <=> ] sort [ first ] keep last over - 2array
-;
-
-: find-xy-ranges ( xx yy -- y-range yy x-range xx )
- [ find-range ] keep rot [ find-range ] keep
+ natural-sort [ first ] [ last ] bi over - 2array
 ;
 
 : normalize-series ( range series -- normalized-series )
- [ over first - over second / ] map nip
+ swap first2 '[ _ - _ / ] map
 ;
 
 : <graph-gadget> ( xx yy -- graph-gadget )
@@ -115,34 +133,60 @@ M: graph-gadget handle-gesture
  swap >>x-series
 ;
 
-M: graph-gadget draw-gadget*
+
+: auto-range-find ( gadget -- )
  dup auto-range>>
-  [ dup x-series>> find-range >>x-range ] [ ] if
- dup auto-range>>
-  [ dup y-series>> find-range >>y-range ] [ ] if
-
- [ x-range>> ] keep [ x-series>> ] keep -rot
- normalize-series
- over dim>> first swap
- [ over * ] map nip
- over
- [ y-range>> ] keep [ y-series>> ] keep -rot
- normalize-series
- over dim>> last swap
- [ 1 swap - over * ] map nip
- rot swap
- [ 2array ] { } 2map-as flatten >float-array
- gl-vertex-pointer
- 255 0 0 255 <rgba> gl-color
- x-series>> length GL_LINE_STRIP 0 rot glDrawArrays
-
-
- box>> [ loc>> ] keep dim>>
- dup first 0 >
- [
-   255 0 0 0.2 <rgba> gl-color
-   [ gl-fill-rect ] 2keep
-   0 0 0 1 <rgba> gl-color
-   gl-rect
- ] [ 2drop ] if
+  [
+    dup x-series>> find-range >>x-range
+    dup y-series>> find-range >>y-range
+  ] when
+ drop
 ;
+
+: draw-box? ( box -- ? )
+ dim>> first 0 >
+;
+
+: draw-box ( gadget -- )
+ box>> dup draw-box?
+ [
+   [ loc>> ] [ dim>> ] bi
+   [ box-fill-color gl-color gl-fill-rect ]
+   [ box-line-color gl-color gl-rect ] 2bi
+ ] [ drop ] if 
+;
+
+: x>screen ( gadget -- x-screen )
+ [ [ x-range>> ] [ x-series>> ] bi normalize-series ]
+ [ dim>> first ] bi
+ [ * ] curry map
+;
+
+: y>screen ( gadget -- y-screen )
+ [ [ y-range>> ] [ y-series>> ] bi normalize-series ]
+ [ dim>> last ] bi
+ '[ 1 swap - _ * ] map
+;
+
+: length-and-series ( gadget -- length x-screen y-screen )
+ [ x-series>> length ] [ x>screen ] [ y>screen ] tri
+;
+
+: series>array ( x-screen y-screen -- xy-screen-array )
+ [ 2array ] { } 2map-as flatten >float-array
+;
+
+: draw-line-strip ( length -- )
+ GL_LINE_STRIP 0 rot glDrawArrays
+;
+
+: draw-series ( gadget -- )
+ length-and-series series>array gl-vertex-pointer
+ line-color gl-color
+ draw-line-strip
+;
+
+M: graph-gadget draw-gadget*
+ [ auto-range-find ] [ draw-series ] [ draw-box ] tri
+;
+
