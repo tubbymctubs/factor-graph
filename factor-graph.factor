@@ -6,7 +6,7 @@ accessors sorting sequences combinators sequences.deep
 math math.constants math.order math.ranges 
 math.functions math.rectangles math.vectors
 ui ui.gadgets ui.gadgets.editors ui.gestures ui.render
-colors opengl opengl.gl
+colors opengl opengl.gl opengl.glu
 specialized-arrays.instances.float
 ;
 
@@ -157,15 +157,15 @@ M: graph-gadget handle-gesture
 ;
 
 : x>screen ( gadget -- x-screen )
- [ [ x-range>> ] [ x-series>> ] bi normalize-series ]
- [ dim>> first ] bi
- [ * ] curry map
+ [ x-range>> ] [ x-series>> ] bi normalize-series
+ ! [ dim>> first ] bi
+ ! [ * ] curry map
 ;
 
 : y>screen ( gadget -- y-screen )
- [ [ y-range>> ] [ y-series>> ] bi normalize-series ]
- [ dim>> last ] bi
- '[ 1 swap - _ * ] map
+ [ y-range>> ] [ y-series>> ] bi normalize-series
+ '[ 1 swap - ] map
+! [ dim>> last ] bi
 ;
 
 : length-and-series ( gadget -- length x-screen y-screen )
@@ -186,7 +186,23 @@ M: graph-gadget handle-gesture
  draw-line-strip
 ;
 
+: norm-dim ( val -- -1/w 1/w )
+ 1 swap / dup 0 swap - swap
+;
+
+: norm-height ( gadget -- -1/h 1/h )
+ dim>> last
+ 1 swap / dup 0 swap - swap
+;
+
+
 M: graph-gadget draw-gadget*
- [ auto-range-find ] [ draw-series ] [ draw-box ] tri
+
+ ! this is a bit nasty again, I'll clean it up later.
+ GL_LINE_SMOOTH glEnable
+ [
+  [ [ [ dim>> first norm-dim ] [ dim>> last norm-dim ] bi gluOrtho2D ] keep
+    [ auto-range-find ] [ draw-series ] bi ] do-matrix ]
+ [ draw-box ] bi
 ;
 
